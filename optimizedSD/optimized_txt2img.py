@@ -32,6 +32,17 @@ def load_model_from_config(ckpt, verbose=False):
     sd = pl_sd["state_dict"]
     return sd
 
+def load_GFPGAN():
+    model_name = 'GFPGANv1.3'
+    model_path = os.path.join(GFPGAN_dir, 'experiments/pretrained_models', model_name + '.pth')
+    if not os.path.isfile(model_path):
+        raise Exception("GFPGAN model not found at path "+model_path)
+
+    sys.path.append(os.path.abspath(GFPGAN_dir))
+    from gfpgan import GFPGANer
+
+    return GFPGANer(model_path=model_path, upscale=1, arch='clean', channel_multiplier=2, bg_upsampler=None)
+
 
 config = "optimizedSD/v1-inference.yaml"
 ckpt = "models/ldm/stable-diffusion-v1/model.ckpt"
@@ -164,7 +175,33 @@ parser.add_argument(
     choices=["full", "autocast"],
     default="autocast"
 )
+
+#Taken From https://github.com/hlky/stable-diffusion-webui/blob/master/webui.py
+parser.add_argument(
+    "--gfpgan-dir",
+    type=str,
+    help="GFPGAN directory",
+    default=None
+) # i disagree with where you're putting it but since all guidefags are doing it this way, there you go
+
 opt = parser.parse_args()
+
+# ------------------------------------------------------------------------------
+
+GFPGAN_dir = opt.gfpgan_dir
+GFPGAN = None
+if GFPGAN_dir is not None and os.path.exists(GFPGAN_dir):
+    try:
+        GFPGAN = load_GFPGAN()
+        print("Loaded GFPGAN")
+    except Exception:
+        import traceback
+        print("Error loading GFPGAN:", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        raise Exception("Prout")
+else:
+    print("GFPGAN not found at", GFPGAN_dir)
+	
 
 tic = time.time()
 os.makedirs(opt.outdir, exist_ok=True)
@@ -307,8 +344,16 @@ with torch.no_grad():
                     x_samples_ddim = modelFS.decode_first_stage(samples_ddim[i].unsqueeze(0))
                     x_sample = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                     x_sample = 255. * rearrange(x_sample[0].cpu().numpy(), 'c h w -> h w c')
-                    Image.fromarray(x_sample.astype(np.uint8)).save(
-                        os.path.join(sample_path, "seed_" + str(opt.seed) + "_" + f"{base_count:05}.png"))
+                    x_sample = x_sample.astype(np.uint8);
+                    
+                    if GFPGAN is not None:
+                        cropped_faces, restored_faces, restored_img = GFPGAN.enhance(x_sample[:,:,::-1], has_aligned=False, only_center_face=False, paste_back=True)
+                        x_sample = restored_img[:,:,::-1]
+                        print("GFPGAN Applied")
+
+                    img = Image.fromarray(x_sample)
+                    
+                    img.save(os.path.join(sample_path, "seed_" + str(opt.seed) + "_" + f"{base_count:05}.png"))
                     opt.seed+=1
                     base_count += 1
 
