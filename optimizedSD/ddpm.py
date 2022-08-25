@@ -376,7 +376,7 @@ class UNet(DDPM):
 
     @rank_zero_only
     @torch.no_grad()
-    def on_train_batch_start(self, batch, batch_idx, dataloader_idx):
+    def on_train_batch_start(self, batch, batch_idx):
         # only for very first batch
         if self.scale_by_std and self.current_epoch == 0 and self.global_step == 0 and batch_idx == 0 and not self.restarted_from_ckpt:
             assert self.scale_factor == 1., 'rather not use custom rescaling and std-rescaling simultaneously'
@@ -437,8 +437,7 @@ class UNet(DDPM):
             setattr(self, name, attr)
 
     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
-        if ddim_eta != 0:
-            raise ValueError('ddim_eta must be 0 for PLMS')
+
         self.ddim_timesteps = make_ddim_timesteps(ddim_discr_method=ddim_discretize, num_ddim_timesteps=ddim_num_steps,
                                                   num_ddpm_timesteps=self.num_timesteps,verbose=verbose)
         alphas_cumprod = self.alphas_cumprod
@@ -530,7 +529,6 @@ class UNet(DDPM):
         device = self.betas.device
         b = shape[0]
         if x_T is None:
-            # img = torch.randn(shape, device=device)
             _, b1, b2, b3 = shape
             img_shape = (1, b1, b2, b3)
             tens = []
@@ -651,10 +649,10 @@ class UNet(DDPM):
 
 
     @torch.no_grad()
-    def stochastic_encode(self, x0, t, seed, ddim_steps,use_original_steps=False, noise=None):
+    def stochastic_encode(self, x0, t, seed, ddim_eta,ddim_steps,use_original_steps=False, noise=None, mask=None):
         # fast, but does not allow for exact reconstruction
         # t serves as an index to gather the correct alphas
-        self.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=0.0, verbose=False)
+        self.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=ddim_eta, verbose=False)
 
         if use_original_steps:
             sqrt_alphas_cumprod = self.sqrt_alphas_cumprod
@@ -674,12 +672,15 @@ class UNet(DDPM):
                 seed+=1
             noise = torch.cat(tens)
             del tens
+        print(noise.shape)
+        if mask is not None:
+            noise = noise*mask
         return (extract_into_tensor(sqrt_alphas_cumprod, t, x0.shape) * x0 +
                 extract_into_tensor(sqrt_one_minus_alphas_cumprod.to("cuda"), t, x0.shape) * noise)
 
     @torch.no_grad()
     def decode(self, x_latent, cond, t_start, unconditional_guidance_scale=1.0, unconditional_conditioning=None,
-               use_original_steps=False):
+               mask = None,use_original_steps=False):
 
         timesteps = np.arange(self.ddpm_num_timesteps) if use_original_steps else self.ddim_timesteps
         timesteps = timesteps[:t_start]
@@ -690,12 +691,21 @@ class UNet(DDPM):
 
         iterator = tqdm(time_range, desc='Decoding image', total=total_steps)
         x_dec = x_latent
+        x0 = x_latent
+        print(x0.shape)
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
             ts = torch.full((x_latent.shape[0],), step, device=x_latent.device, dtype=torch.long)
+            
+
+            if mask is not None:
+                x_dec = x0 * mask + (1. - mask) * x_dec
+
             x_dec = self.p_sample_ddim(x_dec, cond, ts, index=index, use_original_steps=use_original_steps,
                                           unconditional_guidance_scale=unconditional_guidance_scale,
                                           unconditional_conditioning=unconditional_conditioning)
+        if mask is not None:
+            return x0 * mask + (1. - mask) * x_dec
         return x_dec
 
     @torch.no_grad()
@@ -710,6 +720,7 @@ class UNet(DDPM):
             x_in = torch.cat([x] * 2)
             t_in = torch.cat([t] * 2)
             c_in = torch.cat([unconditional_conditioning, c])
+            # print("xin shape = ", x_in.shape)
             e_t_uncond, e_t = self.apply_model(x_in, t_in, c_in).chunk(2)
             e_t = e_t_uncond + unconditional_guidance_scale * (e_t - e_t_uncond)
 

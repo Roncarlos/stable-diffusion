@@ -14,6 +14,9 @@ from pytorch_lightning import seed_everything
 from torch import autocast
 from contextlib import contextmanager, nullcontext
 from ldm.util import instantiate_from_config
+from split_subprompts import split_weighted_subprompts
+from transformers import logging
+logging.set_verbosity_error()
 
 
 def chunk(it, size):
@@ -223,6 +226,7 @@ modelFS = instantiate_from_config(config.modelFirstStage)
 _, _ = modelFS.load_state_dict(sd, strict=False)
 modelFS.eval()
 del sd
+
 if opt.precision == "autocast":
     model.half()
     modelCS.half()
@@ -243,6 +247,7 @@ else:
     print(f"reading prompts from {opt.from_file}")
     with open(opt.from_file, "r") as f:
         data = f.read().splitlines()
+        data = batch_size * list(data)
         data = list(chunk(data, batch_size))
 
 
@@ -260,7 +265,21 @@ with torch.no_grad():
                 if isinstance(prompts, tuple):
                     prompts = list(prompts)
                 
-                c = modelCS.get_learned_conditioning(prompts)
+
+                subprompts,weights = split_weighted_subprompts(prompts[0])
+                if len(subprompts) > 1:
+                    c = torch.zeros_like(uc)
+                    totalWeight = sum(weights)
+                    # normalize each "sub prompt" and add it
+                    for i in range(len(subprompts)):
+                        weight = weights[i]
+                        # if not skip_normalize:
+                        weight = weight / totalWeight
+                        c = torch.add(c,modelCS.get_learned_conditioning(subprompts[i]), alpha=weight)
+                else:
+                    c = modelCS.get_learned_conditioning(prompts)
+
+
                 shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
                 mem = torch.cuda.memory_allocated()/1e6
                 modelCS.to("cpu")
@@ -280,6 +299,8 @@ with torch.no_grad():
                                 x_T=start_code)
 
                 modelFS.to(device)
+
+                print(samples_ddim.shape)
                 print("saving images")
                 for i in range(batch_size):
                     

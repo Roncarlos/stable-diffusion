@@ -19,6 +19,9 @@ from torch import autocast
 from einops import rearrange, repeat
 from contextlib import nullcontext
 from ldm.util import instantiate_from_config
+from transformers import logging
+from split_subprompts import split_weighted_subprompts
+logging.set_verbosity_error()
 
 
 def chunk(it, size):
@@ -36,7 +39,7 @@ def load_model_from_config(ckpt, verbose=False):
 
 def load_img(image, h0, w0):
    
-    image = Image.fromarray(image)
+    image = image.convert("RGB")
     w, h = image.size
     print(f"loaded input image of size ({w}, {h})")   
     if(h0 is not None and w0 is not None):
@@ -88,10 +91,9 @@ _, _ = modelFS.load_state_dict(sd, strict=False)
 modelFS.eval()
 del sd
 
-def generate(image, prompt,strength,ddim_steps,n_iter, batch_size, Height, Width, seed, small_batch = "False", full_precision = "False",outdir = "outputs/txt2img-samples"):
+def generate(image, prompt,strength,ddim_steps,n_iter, batch_size, Height, Width, scale,ddim_eta, seed, small_batch = "False", full_precision = "False",outdir = "outputs/img2img-samples"):
    
     device = "cuda"
-    scale = 7.5
     model.small_batch = small_batch
     
     init_image = load_img(image, Height, Width).to(device)
@@ -147,6 +149,19 @@ def generate(image, prompt,strength,ddim_steps,n_iter, batch_size, Height, Width
                         uc = modelCS.get_learned_conditioning(batch_size * [""])
                     if isinstance(prompts, tuple):
                         prompts = list(prompts)
+
+                    subprompts,weights = split_weighted_subprompts(prompts[0])
+                    if len(subprompts) > 1:
+                        c = torch.zeros_like(uc)
+                        totalWeight = sum(weights)
+                        # normalize each "sub prompt" and add it
+                        for i in range(len(subprompts)):
+                            weight = weights[i]
+                            # if not skip_normalize:
+                            weight = weight / totalWeight
+                            c = torch.add(c,modelCS.get_learned_conditioning(subprompts[i]), alpha=weight)
+                    else:
+                        c = modelCS.get_learned_conditioning(prompts)
                     
                     c = modelCS.get_learned_conditioning(prompts)
                     mem = torch.cuda.memory_allocated()/1e6
@@ -155,7 +170,7 @@ def generate(image, prompt,strength,ddim_steps,n_iter, batch_size, Height, Width
                         time.sleep(1)
 
                     # encode (scaled latent)
-                    z_enc = model.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device), seed,ddim_steps)
+                    z_enc = model.stochastic_encode(init_latent, torch.tensor([t_enc]*batch_size).to(device), seed,ddim_eta,ddim_steps)
                     # decode it
                     samples_ddim = model.decode(z_enc, c, t_enc, unconditional_guidance_scale=scale,
                                                     unconditional_conditioning=uc,)
@@ -195,8 +210,8 @@ def generate(image, prompt,strength,ddim_steps,n_iter, batch_size, Height, Width
 
 demo = gr.Interface(
     fn=generate,
-    inputs=["image","text",gr.Slider(0, 1,value=0.75),gr.Slider(1, 1000,value=50),gr.Slider(1, 100, step=1), gr.Slider(1, 100,step=1),
-    gr.Slider(512, 4096, step=64), gr.Slider(512,4096,step=64), "text","checkbox", "checkbox",gr.Text(value = "outputs/txt2img-samples")],
-    outputs=[gr.Image(tool="editor", type="pil"), "text"],
+    inputs=[gr.Image(tool="editor", type="pil"),"text",gr.Slider(0, 1,value=0.75),gr.Slider(1, 1000,value=50),gr.Slider(1, 100, step=1), gr.Slider(1, 100,step=1),
+    gr.Slider(64,4096,value = 512,step=64), gr.Slider(64,4096,value = 512,step=64), gr.Slider(0,50,value=7.5,step=0.1),gr.Slider(0,1,step=0.01),"text","checkbox", "checkbox",gr.Text(value = "outputs/img2img-samples")],
+    outputs=["image", "text"],
 )
 demo.launch()
