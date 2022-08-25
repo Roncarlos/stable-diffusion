@@ -51,6 +51,11 @@ parser.add_argument(
     default="outputs/txt2img-samples"
 )
 parser.add_argument(
+    "--config",
+    type=str,
+    help="path to config",
+)
+parser.add_argument(
     "--skip_grid",
     action='store_true',
     help="do not save a grid, only individual samples. Helpful when evaluating lots of samples",
@@ -65,6 +70,13 @@ parser.add_argument(
     type=int,
     default=50,
     help="number of ddim sampling steps",
+)
+
+parser.add_argument(
+    "--ckpt",
+    type=str,
+    default="models/ldm/stable-diffusion-v1/model.ckpt",
+    help="path to checkpoint of model",
 )
 
 parser.add_argument(
@@ -166,7 +178,12 @@ print("init_seed = ", opt.seed)
 seed_everything(opt.seed)
 
 
-sd = load_model_from_config(f"{ckpt}")
+opt.H = 64 * round(opt.H / 64)
+opt.W = 64 * round(opt.W / 64)
+
+
+
+sd = load_model_from_config(f"{opt.ckpt if opt.ckpt else ckpt}")
 li = []
 lo = []
 for key, value in sd.items():
@@ -185,7 +202,7 @@ for key in li:
 for key in lo:
     sd['model2.' + key[6:]] = sd.pop(key)
 
-config = OmegaConf.load(f"{config}")
+config = OmegaConf.load(f"{opt.config if opt.config else config}")
 
 if opt.small_batch:
     config.modelUNet.params.small_batch = True
