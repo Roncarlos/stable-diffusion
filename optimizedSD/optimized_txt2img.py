@@ -41,7 +41,7 @@ def load_GFPGAN():
     sys.path.append(os.path.abspath(GFPGAN_dir))
     from gfpgan import GFPGANer
 
-    return GFPGANer(model_path=model_path, upscale=1, arch='clean', channel_multiplier=2, bg_upsampler=None)
+    return GFPGANer(model_path=model_path, upscale=opt.upscale, arch='clean', channel_multiplier=2, bg_upsampler=None)
 
 
 config = "optimizedSD/v1-inference.yaml"
@@ -183,6 +183,13 @@ parser.add_argument(
     help="GFPGAN directory",
     default=None
 ) # i disagree with where you're putting it but since all guidefags are doing it this way, there you go
+
+parser.add_argument(
+    "--upscale",
+    type=int,
+    default=1,
+    help="The upscale to use with GFPGAN",
+)
 
 opt = parser.parse_args()
 

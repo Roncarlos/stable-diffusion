@@ -41,7 +41,7 @@ def load_GFPGAN():
     sys.path.append(os.path.abspath(GFPGAN_dir))
     from gfpgan import GFPGANer
 
-    return GFPGANer(model_path=model_path, upscale=1, arch='clean', channel_multiplier=2, bg_upsampler=None)
+    return GFPGANer(model_path=model_path, upscale=opt.upscale, arch='clean', channel_multiplier=2, bg_upsampler=None)
 
 def load_img(path, h0, w0):
    
@@ -201,6 +201,14 @@ parser.add_argument(
     type=str,
     help="path to config",
 )
+
+parser.add_argument(
+    "--upscale",
+    type=int,
+    default=1,
+    help="The upscale to use with GFPGAN",
+)
+
 
 #Taken From https://github.com/hlky/stable-diffusion-webui/blob/master/webui.py
 parser.add_argument(
