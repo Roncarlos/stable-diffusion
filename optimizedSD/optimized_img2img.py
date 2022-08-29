@@ -43,7 +43,21 @@ def load_GFPGAN():
     sys.path.append(os.path.abspath(GFPGAN_dir))
     from gfpgan import GFPGANer
 
-    return GFPGANer(model_path=model_path, upscale=opt.upscale, arch='clean', channel_multiplier=2, bg_upsampler=None)
+    return GFPGANer(model_path=model_path, upscale=1, arch='clean', channel_multiplier=2, bg_upsampler=None)
+
+def load_Real_ESRGAN():
+    model_name = 'RealESRGAN_x4plus'
+    model_path = os.path.join(Real_ESRGAN_dir, 'experiments/pretrained_models', model_name + '.pth')
+    if not os.path.isfile(model_path):
+        raise Exception("Real_ESRGAN model not found at path "+model_path)
+    
+    sys.path.append(os.path.abspath(Real_ESRGAN_dir))
+    from realesrgan import RealESRGANer
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    
+    return RealESRGANer(model_path=model_path, model=RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4), scale=opt.upscale)
+
+
 
 def load_img(path, h0, w0):
 
@@ -206,8 +220,15 @@ parser.add_argument(
 parser.add_argument(
     "--upscale",
     type=int,
-    default=1,
-    help="The upscale to use with GFPGAN",
+    default=4,
+    help="The upscale to use with Real ESRGAN",
+)
+
+parser.add_argument(
+	"--real-esrgan-dir",
+	type=str,
+	help="Real ESRGAN directory",
+	default=None
 )
 
 
@@ -233,6 +254,21 @@ if GFPGAN_dir is not None and os.path.exists(GFPGAN_dir):
         import traceback
         print("Error loading GFPGAN:", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
+
+Real_ESRGAN_dir = opt.real_esrgan_dir
+Real_ESRGAN = None
+if Real_ESRGAN_dir is not None and os.path.exists(Real_ESRGAN_dir):
+	try:
+		Real_ESRGAN = load_Real_ESRGAN()
+		print("Loaded Real_ESRGAN")
+	except Exception:
+		import traceback
+		print("Error loading Real_ESRGAN:", file=sys.stderr)
+		print(traceback.format_exc(), file=sys.stderr)
+		raise Exception("Prout")
+else:
+	print("Real_ESRGAN not found at", Real_ESRGAN_dir)
+	
 
 tic = time.time()
 os.makedirs(opt.outdir, exist_ok=True)
@@ -394,6 +430,12 @@ with torch.no_grad():
                         cropped_faces, restored_faces, restored_img = GFPGAN.enhance(x_sample[:,:,::-1], has_aligned=False, only_center_face=False, paste_back=True)
                         x_sample = restored_img[:,:,::-1]
                         print("GFPGAN Applied")
+
+                    if Real_ESRGAN is not None:
+                        upscale_img, img_mode = Real_ESRGAN.enhance(x_sample[:,:,::-1])
+                        x_sample = upscale_img[:,:,::-1]
+                        print("Real_ESRGAN Applied")
+
 
                     img = Image.fromarray(x_sample)
                     
