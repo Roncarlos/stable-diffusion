@@ -55,10 +55,6 @@ def load_Real_ESRGAN():
     
     return RealESRGANer(model_path=model_path, model=RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4), scale=opt.upscale)
 
-
-config = "optimizedSD/v1-inference.yaml"
-ckpt = "models/ldm/stable-diffusion-v1/model.ckpt"
-
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
@@ -75,6 +71,7 @@ parser.add_argument(
     "--config",
     type=str,
     help="path to config",
+	default="optimizedSD/v1-inference.yaml"
 )
 parser.add_argument(
     "--skip_grid",
@@ -274,7 +271,7 @@ opt.W = 64 * round(opt.W / 64)
 
 
 
-sd = load_model_from_config(f"{opt.ckpt if opt.ckpt else ckpt}")
+sd = load_model_from_config(f"{opt.ckpt}")
 li = []
 lo = []
 for key, value in sd.items():
@@ -293,7 +290,7 @@ for key in li:
 for key in lo:
     sd["model2." + key[6:]] = sd.pop(key)
 
-config = OmegaConf.load(f"{opt.config if opt.config else config}")
+config = OmegaConf.load(f"{opt.config}")
 
 model = instantiate_from_config(config.modelUNet)
 _, _ = model.load_state_dict(sd, strict=False)
