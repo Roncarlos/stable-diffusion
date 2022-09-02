@@ -209,6 +209,13 @@ parser.add_argument(
     default="png",
 )
 parser.add_argument(
+    "--sampler",
+    type=str,
+    help="sampler",
+    choices=["ddim"],
+    default="ddim",
+)
+parser.add_argument(
     "--config",
     type=str,
     help="path to config",
@@ -407,12 +414,13 @@ with torch.no_grad():
                     opt.ddim_steps,
                 )
                 # decode it
-                samples_ddim = model.decode(
-                    z_enc,
-                    c,
+                samples_ddim = model.sample(
                     t_enc,
+                    c,
+                    z_enc,
                     unconditional_guidance_scale=opt.scale,
                     unconditional_conditioning=uc,
+                    sampler = opt.sampler
                 )
 
                 modelFS.to(opt.device)
